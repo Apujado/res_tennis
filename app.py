@@ -96,7 +96,7 @@ with st.sidebar:
     # Boutons d'action call-to-action
     st.markdown(
         """
-        [💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aurelie-pujado/)
+        [💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aureliepujado/)
         
         [💻 Voir le code sur GitHub](https://github.com/Apujado/res_tennis)
         """
