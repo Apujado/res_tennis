@@ -31,6 +31,7 @@ def generer_recu_texte(user_id, date, creneau):
     timestamp = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     id_unique = f"RESA-{datetime.now().strftime('%Y%m%d')}-{hash(user_id + date + creneau) % 10000:04d}"
     
+    # 📝 AJOUT : Signature DataPeakInsights dans le reçu officiel téléchargé
     recu = f"""
 ==================================================
         REÇU OFFICIEL DE RÉSERVATION
@@ -39,6 +40,7 @@ def generer_recu_texte(user_id, date, creneau):
 
 🎟️ N° DE TICKET : {id_unique}
 📅 Émis le : {timestamp}
+🚀 Solution propulsée par DataPeakInsights
 
 --------------------------------------------------
 👤 BÉNÉFICIAIRE :
@@ -71,6 +73,39 @@ copro_data = load_copro_data()
 if 'reservations' not in st.session_state:
     st.session_state.reservations = load_reservations()
 
+
+# --- ✨ NOUVEAU : SIDEBAR PROFESSIONNELLE (VITRINE) ---
+with st.sidebar:
+    st.markdown("## 📊 DataPeakInsights")
+    st.markdown(
+        """
+        <div style="background-color: #f0f2f6; padding: 15px; border-radius: 10px; border-left: 5px solid #1e4620; margin-bottom: 20px;">
+            <p style="margin: 0; font-size: 0.95em; color: #2c3e50;">
+                Cette application a été développée et offerte bénévolement à la copropriété par <strong>Aurélie Pujado</strong>.
+            </p>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    st.subheader("💡 Une idée ? Un projet ?")
+    st.write(
+        "Spécialisée en ingénierie des données et création d'applications métiers sur-mesure, "
+        "j'accompagne les entreprises dans la valorisation de leurs données."
+    )
+    
+    # Boutons d'action call-to-action
+    st.markdown(
+        """
+        [💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aurelie-pujado/)
+        
+        [💻 Voir le code sur GitHub](https://github.com/Apujado/res_tennis)
+        """
+    )
+    st.write("---")
+    st.caption("© 2026 DataPeakInsights. Tous droits réservés.")
+
+
+# --- CONTENU PRINCIPAL ---
 st.title("🎾 Réservation du Court de Tennis")
 st.write("Bienvenue sur la plateforme de réservation de la copropriété.")
 
@@ -80,7 +115,6 @@ st.subheader("👤 Vérification de votre profil")
 if not copro_data:
     st.error("Le fichier 'coproprietaires.json' est introuvable. Veuillez d'abord exécuter convert.py.")
 else:
-    # Utilisation de clés uniques pour éviter les conflits d'état Streamlit
     immeuble_saisi = st.text_input("Entrez le nom de votre Immeuble", key="input_immeuble").strip()
     access_granted = False
     user_id = ""
