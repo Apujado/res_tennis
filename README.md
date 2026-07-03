@@ -9,7 +9,7 @@ Une application web légère et intuitive conçue pour simplifier la gestion et 
 
 ## 📱 Accéder à l'application
 L'application est déployée et accessible en ligne ici :  
-👉 **[LIEN_DE_VOTRE_APP](https://restennis-9svx4sgawlfu7u9afym8qt.streamlit.app/)**
+👉 **(https://restennis-9svx4sgawlfu7u9afym8qt.streamlit.app/)**
 
 ---
 
