@@ -1,11 +1,7 @@
 import streamlit as st
 import json
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-import threading
 
 # Configuration de la page
 st.set_page_config(page_title="Réservation Tennis Copropriété", layout="centered")
@@ -175,7 +171,7 @@ else:
                     save_reservations(st.session_state.reservations)
                     st.rerun()
             else:
-                st.error(f"Ce créneau est déjà réservé par : {deja_reserve_par}")
+                st.error("Ce créneau est déjà réservé.")
         else:
             if st.button("✅ Réserver ce créneau", key="btn_reserver"):
                 # On compte le nombre de réservations de cet appartement pour ce jour
@@ -211,6 +207,8 @@ else:
         st.subheader(f"📋 Planning du {date_resa.strftime('%d/%m/%Y')}")
         for c in creneaux:
             occupant = st.session_state.reservations[date_str].get(c, "🍃 Libre")
+            if occupant not in ("🍃 Libre", user_id):
+                occupant = "🔒 Réservé"
             st.write(f"**{c}** : {occupant}")
     else:
         st.write("---")

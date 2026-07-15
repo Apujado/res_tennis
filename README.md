@@ -18,15 +18,27 @@ L'application est déployée et accessible en ligne ici :
 Si vous souhaitez faire tourner le projet en local ou y contribuer :
 
 ### Prérequis
-* [Node.js](https://nodejs.org/) (ou autre techno selon votre stack)
+* [Python 3.10+](https://www.python.org/downloads/)
 
 ### Lancement
 ```bash
 # Cloner le projet
-git clone [https://github.com/](https://github.com/)[VotrePseudo]/[NomDuRepo].git
+git clone https://github.com/[VotrePseudo]/res_tennis.git
+cd res_tennis
 
 # Installer les dépendances
-npm install
+pip install -r requirements.txt
 
-# Lancer le serveur de développement
-npm run dev
+# Lancer l'application Streamlit
+streamlit run app.py
+```
+
+### Générer les données copropriétaires
+
+Si vous disposez du fichier source `usp_appartements.xlsx`, vous pouvez régénérer `coproprietaires.json` avec :
+
+```bash
+python convert.py
+```
+
+Le fichier Excel doit contenir les colonnes `Immeuble` et `Appartement`.
