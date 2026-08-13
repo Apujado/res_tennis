@@ -1,49 +1,44 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
 from datetime import datetime, timedelta, date
 import os
 import json
+import requests
 
 # Configuration de la page
 st.set_page_config(page_title="Réservation Tennis Copropriété", layout="centered", page_icon="🎾")
 
-# --- CONNEXION GOOGLE SHEETS ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+WEBHOOK_URL = st.secrets.get("WEBHOOK_URL", "")
+CSV_SHEET_URL = "https://docs.google.com/spreadsheets/d/1J01dG2VSyRMVIupituQZlLZduUhoVeUZggM4EI0iMw8/gviz/tq?tqx=out:csv"
 
 def load_reservations_df():
     try:
-        df = conn.read(ttl=0)
-        if df.empty or 'Date' not in df.columns:
+        df = pd.read_csv(CSV_SHEET_URL)
+        # S'assurer que les colonnes nécessaires existent
+        if 'Date' not in df.columns:
             return pd.DataFrame(columns=["Date", "Créneau", "Logement"])
         return df.dropna(how="all")
     except Exception:
         return pd.DataFrame(columns=["Date", "Créneau", "Logement"])
 
 def save_reservation_gsheet(date_str, creneau, user_id):
-    df_current = load_reservations_df()
-    new_row = pd.DataFrame([{"Date": str(date_str), "Créneau": str(creneau), "Logement": str(user_id)}])
-    df_updated = pd.concat([df_current, new_row], ignore_index=True)
-    conn.update(data=df_updated)
+    if WEBHOOK_URL:
+        payload = {"action": "add", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
+        requests.post(WEBHOOK_URL, json=payload)
 
 def delete_reservation_gsheet(date_str, creneau, user_id):
-    df_current = load_reservations_df()
-    df_updated = df_current[~((df_current['Date'] == str(date_str)) & 
-                               (df_current['Créneau'] == str(creneau)) & 
-                               (df_current['Logement'] == str(user_id)))]
-    conn.update(data=df_updated)
+    if WEBHOOK_URL:
+        payload = {"action": "delete", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
+        requests.post(WEBHOOK_URL, json=payload)
 
-# --- FONCTION AUXILIAIRE POUR VÉRIFIER SI UN CRÉNEAU EST TERMINÉ ---
 def est_creneau_termine(date_str, creneau_str):
     try:
-        # Extraire l'heure de fin du créneau (ex: "08:00 - 08:50" -> "08:50")
         heure_fin_str = creneau_str.split("-")[1].strip()
         dt_fin_creneau = datetime.strptime(f"{date_str} {heure_fin_str}", "%Y-%m-%d %H:%M")
         return datetime.now() > dt_fin_creneau
     except Exception:
         return False
 
-# --- FONCTION DE GÉNÉRATION DE REÇU TEXTE ---
 def generer_recu_texte(user_id, date_str_fr, creneau):
     timestamp = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     id_unique = f"RESA-{datetime.now().strftime('%Y%m%d')}-{hash(user_id + date_str_fr + creneau) % 10000:04d}"
@@ -76,7 +71,6 @@ def generer_recu_texte(user_id, date_str_fr, creneau):
     """
     return recu, id_unique
 
-# Chargement de la liste des copropriétaires
 @st.cache_data
 def load_copro_data():
     if os.path.exists('coproprietaires.json'):
@@ -86,7 +80,6 @@ def load_copro_data():
 
 copro_data = load_copro_data()
 
-# --- SIDEBAR VITRINE ---
 with st.sidebar:
     st.markdown("## 📊 DataPeakInsights")
     st.markdown(
@@ -100,27 +93,16 @@ with st.sidebar:
         unsafe_allow_html=True
     )
     st.subheader("💡 Une idée ? Un projet ?")
-    st.write(
-        "Spécialisée en ingénierie des données et création d'applications métiers sur-mesure, "
-        "j'accompagne les entreprises dans la valorisation de leurs données."
-    )
-    st.markdown(
-        """
-        [💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aureliepujado/)
-        
-        [💻 Voir le code sur GitHub](https://github.com/Apujado/res_tennis)
-        """
-    )
+    st.write("Spécialisée en ingénierie des données et création d'applications métiers sur-mesure.")
+    st.markdown("[💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aureliepujado/)")
     st.write("---")
     st.caption("© 2026 DataPeakInsights. Tous droits réservés.")
 
-# --- EN-TÊTE ET TITRE PRINCIPAL ---
 st.title("🎾 Réservation du Court de Tennis")
 st.write("Bienvenue sur la plateforme de réservation de la copropriété.")
 
 df_resas = load_reservations_df()
 
-# --- VÉRIFICATION DU PROFIL ---
 st.subheader("👤 Identification du logement")
 
 if not copro_data:
@@ -143,23 +125,18 @@ else:
                     st.success(f"✅ Profil validé : Connecté en tant que **{user_id}**")
                     access_granted = True
                 else:
-                    st.error("❌ Numéro d'appartement inconnu pour cet immeuble. Accès bloqué.")
+                    st.error("❌ Numéro d'appartement inconnu pour cet immeuble.")
         else:
-            st.error("❌ Cet immeuble ne fait pas partie de la copropriété. Accès bloqué.")
+            st.error("❌ Cet immeuble ne fait pas partie de la copropriété.")
 
     if access_granted:
         st.write("---")
         st.subheader("📅 Choisir un créneau")
         
-        # Limite stricte à 3 jours glissants
         date_aujourdhui = date.today()
         date_max = date_aujourdhui + timedelta(days=2)
         
-        date_resa = st.date_input(
-            "Date de réservation (ouverture à 3 jours glissants max)", 
-            min_value=date_aujourdhui, 
-            max_value=date_max
-        )
+        date_resa = st.date_input("Date de réservation (3 jours glissants max)", min_value=date_aujourdhui, max_value=date_max)
         date_str = date_resa.strftime("%Y-%m-%d")
 
         creneaux = [
@@ -171,7 +148,7 @@ else:
 
         creneau_choisi = st.selectbox("Créneaux disponibles", creneaux)
         
-        resas_jour = df_resas[df_resas['Date'] == date_str] if not df_resas.empty else pd.DataFrame()
+        resas_jour = df_resas[df_resas['Date'].astype(str) == date_str] if not df_resas.empty else pd.DataFrame()
         match_creneau = resas_jour[resas_jour['Créneau'] == creneau_choisi] if not resas_jour.empty else pd.DataFrame()
         deja_reserve_par = match_creneau['Logement'].values[0] if not match_creneau.empty else None
 
@@ -179,13 +156,7 @@ else:
             if deja_reserve_par == user_id:
                 st.warning("Vous avez réservé ce créneau.")
                 texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
-                st.download_button(
-                    label="📥 Télécharger à nouveau mon reçu",
-                    data=texte_recu,
-                    file_name=f"{filename}.txt",
-                    mime="text/plain",
-                    key="download_again"
-                )
+                st.download_button("📥 Télécharger à nouveau mon reçu", data=texte_recu, file_name=f"{filename}.txt", mime="text/plain", key="download_again")
                 if st.button("❌ Annuler ma réservation", key="btn_annuler"):
                     delete_reservation_gsheet(date_str, creneau_choisi, user_id)
                     st.success("Réservation annulée !")
@@ -194,26 +165,20 @@ else:
                 st.error(f"Ce créneau est déjà réservé par : {deja_reserve_par}")
         else:
             if st.button("✅ Réserver ce créneau", key="btn_reserver"):
-                # 1. Vérification du quota du jour (Max 2 résas le même jour)
                 nb_resas_jour_user = len(resas_jour[resas_jour['Logement'] == user_id]) if not resas_jour.empty else 0
                 
-                # 2. Vérification des créneaux actifs non encore joués sur les jours suivants
                 a_des_resas_futures = False
                 if not df_resas.empty:
                     resas_user = df_resas[df_resas['Logement'] == user_id]
                     for _, row in resas_user.iterrows():
-                        if row['Date'] > date_aujourdhui.strftime("%Y-%m-%d"):
+                        if str(row['Date']) > date_aujourdhui.strftime("%Y-%m-%d"):
                             a_des_resas_futures = True
                             break
-                        elif row['Date'] == date_aujourdhui.strftime("%Y-%m-%d"):
-                            if not est_creneau_termine(row['Date'], row['Créneau']):
-                                # C'est un créneau aujourd'hui mais qui n'est pas encore fini
-                                pass  # On autorise si c'est pour la même journée (dans la limite de 2)
 
                 if nb_resas_jour_user >= 2:
                     st.error("🚫 Règle d'équité : Vous avez déjà 2 réservations enregistrées pour cette journée !")
                 elif date_str > date_aujourdhui.strftime("%Y-%m-%d") and a_des_resas_futures:
-                    st.error("🚫 Règle d'équité : Vous avez déjà un créneau à venir non terminé. Vous pourrez réserver sur les jours suivants une fois votre créneau actuel joué !")
+                    st.error("🚫 Règle d'équité : Vous avez déjà un créneau à venir non terminé.")
                 else:
                     save_reservation_gsheet(date_str, creneau_choisi, user_id)
                     st.success("🎉 Réservation confirmée et sauvegardée !")
@@ -221,14 +186,7 @@ else:
                     
                     texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
                     st.code(texte_recu, language="text")
-                    
-                    st.download_button(
-                        label="📥 Télécharger mon reçu officiel (Preuve)",
-                        data=texte_recu,
-                        file_name=f"{filename}.txt",
-                        mime="text/plain",
-                        key="download_first"
-                    )
+                    st.download_button("📥 Télécharger mon reçu officiel (Preuve)", data=texte_recu, file_name=f"{filename}.txt", mime="text/plain", key="download_first")
 
         st.write("---")
         st.subheader(f"📋 Planning du {date_resa.strftime('%d/%m/%Y')}")
@@ -238,22 +196,16 @@ else:
             st.write(f"**{c}** : {occupant}")
     else:
         st.write("---")
-        st.info("💡 Veuillez entrer un immeuble et un numéro d'appartement valides pour débloquer le planning.")
+        st.info("💡 Veuillez entrer un immeuble et un numéro d'appartement valides.")
 
-# --- SECTION DISCRÈTE EN BAS DE PAGE : STATISTIQUES & REGISTRE ---
 st.write("---")
 with st.expander("📊 Consulter l'historique de fréquentation & les statistiques (Optionnel)"):
     if not df_resas.empty:
         col1, col2 = st.columns(2)
         col1.metric("Total réservations enregistrées", len(df_resas))
         col2.metric("Logements participants", df_resas['Logement'].nunique())
-        
         st.write("#### 🏆 Logements les plus actifs")
         st.bar_chart(df_resas['Logement'].value_counts().head(10))
-        
-        st.write("#### ⏰ Créneaux les plus prisés")
-        st.bar_chart(df_resas['Créneau'].value_counts())
-        
         st.write("#### 🔍 Registre des réservations")
         st.dataframe(df_resas.sort_values(by="Date", ascending=False), use_container_width=True)
     else:
