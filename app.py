@@ -13,8 +13,8 @@ CSV_SHEET_URL = "https://docs.google.com/spreadsheets/d/1J01dG2VSyRMVIupituQZlLZ
 
 def load_reservations_df():
     try:
+        # ttl=0 pour relire les données les plus fraîches du Google Sheet
         df = pd.read_csv(CSV_SHEET_URL)
-        # S'assurer que les colonnes nécessaires existent
         if 'Date' not in df.columns:
             return pd.DataFrame(columns=["Date", "Créneau", "Logement"])
         return df.dropna(how="all")
@@ -24,12 +24,19 @@ def load_reservations_df():
 def save_reservation_gsheet(date_str, creneau, user_id):
     if WEBHOOK_URL:
         payload = {"action": "add", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
-        requests.post(WEBHOOK_URL, json=payload)
+        try:
+            # Envoi du JSON avec redirection explicite
+            requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'}, allow_redirects=True)
+        except Exception as e:
+            st.error(f"Erreur de communication avec Google Sheets : {e}")
 
 def delete_reservation_gsheet(date_str, creneau, user_id):
     if WEBHOOK_URL:
         payload = {"action": "delete", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
-        requests.post(WEBHOOK_URL, json=payload)
+        try:
+            requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'}, allow_redirects=True)
+        except Exception as e:
+            st.error(f"Erreur de suppression dans Google Sheets : {e}")
 
 def est_creneau_termine(date_str, creneau_str):
     try:
