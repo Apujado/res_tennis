@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import pandas as pd
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -8,7 +9,7 @@ from datetime import datetime, timedelta
 import threading
 
 # Configuration de la page
-st.set_page_config(page_title="Réservation Tennis Copropriété", layout="centered")
+st.set_page_config(page_title="Réservation Tennis Copropriété", layout="centered", page_icon="🎾")
 
 DB_FILE = "reservations.json"
 
@@ -31,7 +32,6 @@ def generer_recu_texte(user_id, date, creneau):
     timestamp = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
     id_unique = f"RESA-{datetime.now().strftime('%Y%m%d')}-{hash(user_id + date + creneau) % 10000:04d}"
     
-    # 📝 AJOUT : Signature DataPeakInsights dans le reçu officiel téléchargé
     recu = f"""
 ==================================================
         REÇU OFFICIEL DE RÉSERVATION
@@ -74,7 +74,7 @@ if 'reservations' not in st.session_state:
     st.session_state.reservations = load_reservations()
 
 
-# --- ✨ NOUVEAU : SIDEBAR PROFESSIONNELLE (VITRINE) ---
+# --- ✨ SIDEBAR PROFESSIONNELLE (VITRINE) ---
 with st.sidebar:
     st.markdown("## 📊 DataPeakInsights")
     st.markdown(
@@ -93,7 +93,6 @@ with st.sidebar:
         "j'accompagne les entreprises dans la valorisation de leurs données."
     )
     
-    # Boutons d'action call-to-action
     st.markdown(
         """
         [💼 Me contacter sur LinkedIn](https://www.linkedin.com/in/aureliepujado/)
@@ -105,113 +104,160 @@ with st.sidebar:
     st.caption("© 2026 DataPeakInsights. Tous droits réservés.")
 
 
-# --- CONTENU PRINCIPAL ---
-st.title("🎾 Réservation du Court de Tennis")
-st.write("Bienvenue sur la plateforme de réservation de la copropriété.")
+# --- CRÉATION DES ONGLETS NATIVE EN HAUT DE PAGE ---
+tab_resa, tab_stats = st.tabs(["🎾 Réserver un court", "📊 Statistiques & Transparence"])
 
-# --- ESPACE CONNEXION ET VÉRIFICATION ---
-st.subheader("👤 Vérification de votre profil")
 
-if not copro_data:
-    st.error("Le fichier 'coproprietaires.json' est introuvable. Veuillez d'abord exécuter convert.py.")
-else:
-    immeuble_saisi = st.text_input("Entrez le nom de votre Immeuble", key="input_immeuble").strip()
-    access_granted = False
-    user_id = ""
+# ==========================================
+# --- ONGLET 1 : RÉSERVATION DE COURT ---
+# ==========================================
+with tab_resa:
+    st.title("🎾 Réservation du Court de Tennis")
+    st.write("Bienvenue sur la plateforme de réservation de la copropriété.")
 
-    if immeuble_saisi:
-        immeubles_existants = {k.lower(): k for k in copro_data.keys()}
-        if len(immeuble_saisi) >= 3 and immeuble_saisi.lower() in immeubles_existants:
-            vrai_nom_immeuble = immeubles_existants[immeuble_saisi.lower()]
-            appart_saisi = st.text_input("Entrez votre numéro d'appartement", key="input_appart").strip()
-            
-            if appart_saisi:
-                liste_apparts = copro_data[vrai_nom_immeuble]
-                if appart_saisi in liste_apparts:
-                    user_id = f"{vrai_nom_immeuble} - Apt {appart_saisi}"
-                    st.success(f"✅ Profil validé : Connecté en tant que **{user_id}**")
-                    access_granted = True
-                else:
-                    st.error("❌ Numéro d'appartement inconnu pour cet immeuble. Accès bloqué.")
-        else:
-            st.error("❌ Cet immeuble ne fait pas partie de la copropriété. Accès bloqué.")
+    st.subheader("👤 Vérification de votre profil")
 
-    if access_granted:
-        st.write("---")
-        st.subheader("📅 Choisir un créneau")
-        
-        date_resa = st.date_input("Date de réservation", min_value=datetime.today(), max_value=datetime.today() + timedelta(days=7))
-        
-        creneaux = [
-            "08:00 - 08:50", "09:00 - 09:50", "10:00 - 10:50", "11:00 - 11:50",
-            "12:00 - 12:50", "13:00 - 13:50", "14:00 - 14:50", "15:00 - 15:50",
-            "16:00 - 16:50", "17:00 - 17:50", "18:00 - 18:50", "19:00 - 19:50",
-            "20:00 - 20:50", "21:00 - 21:50"
-        ]
-        
-        date_str = date_resa.strftime("%Y-%m-%d")
-        if date_str not in st.session_state.reservations:
-            st.session_state.reservations[date_str] = {}
+    if not copro_data:
+        st.error("Le fichier 'coproprietaires.json' est introuvable. Veuillez d'abord exécuter convert.py.")
+    else:
+        immeuble_saisi = st.text_input("Entrez le nom de votre Immeuble", key="input_immeuble").strip()
+        access_granted = False
+        user_id = ""
 
-        creneau_choisi = st.selectbox("Créneaux disponibles", creneaux)
-        deja_reserve_par = st.session_state.reservations[date_str].get(creneau_choisi)
-
-        if deja_reserve_par:
-            if deja_reserve_par == user_id:
-                st.warning("Vous avez réservé ce créneau.")
+        if immeuble_saisi:
+            immeubles_existants = {k.lower(): k for k in copro_data.keys()}
+            if len(immeuble_saisi) >= 3 and immeuble_saisi.lower() in immeubles_existants:
+                vrai_nom_immeuble = immeubles_existants[immeuble_saisi.lower()]
+                appart_saisi = st.text_input("Entrez votre numéro d'appartement", key="input_appart").strip()
                 
-                # Proposer le téléchargement du reçu même après coup
-                texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
-                st.download_button(
-                    label="📥 Télécharger à nouveau mon reçu",
-                    data=texte_recu,
-                    file_name=f"{filename}.txt",
-                    mime="text/plain",
-                    key="download_again"
-                )
-                
-                if st.button("❌ Annuler ma réservation", key="btn_annuler"):
-                    del st.session_state.reservations[date_str][creneau_choisi]
-                    save_reservations(st.session_state.reservations)
-                    st.rerun()
+                if appart_saisi:
+                    liste_apparts = copro_data[vrai_nom_immeuble]
+                    if appart_saisi in liste_apparts:
+                        user_id = f"{vrai_nom_immeuble} - Apt {appart_saisi}"
+                        st.success(f"✅ Profil validé : Connecté en tant que **{user_id}**")
+                        access_granted = True
+                    else:
+                        st.error("❌ Numéro d'appartement inconnu pour cet immeuble. Accès bloqué.")
             else:
-                st.error(f"Ce créneau est déjà réservé par : {deja_reserve_par}")
-        else:
-            if st.button("✅ Réserver ce créneau", key="btn_reserver"):
-                # On compte le nombre de réservations de cet appartement pour ce jour
-                resas_de_la_journee = st.session_state.reservations[date_str].values()
-                nb_resas_user = sum(1 for res in resas_de_la_journee if res == user_id)
-                
-                if nb_resas_user >= 2:
-                    st.error("🚫 Règles : Vous avez atteint la limite maximale de 2 réservations pour cette journée !")
-                else:
-                    # Enregistrement dans le fichier JSON
-                    st.session_state.reservations[date_str][creneau_choisi] = user_id
-                    save_reservations(st.session_state.reservations)
+                st.error("❌ Cet immeuble ne fait pas partie de la copropriété. Accès bloqué.")
+
+        if access_granted:
+            st.write("---")
+            st.subheader("📅 Choisir un créneau")
+            
+            date_resa = st.date_input("Date de réservation", min_value=datetime.today(), max_value=datetime.today() + timedelta(days=7))
+            
+            creneaux = [
+                "08:00 - 08:50", "09:00 - 09:50", "10:00 - 10:50", "11:00 - 11:50",
+                "12:00 - 12:50", "13:00 - 13:50", "14:00 - 14:50", "15:00 - 15:50",
+                "16:00 - 16:50", "17:00 - 17:50", "18:00 - 18:50", "19:00 - 19:50",
+                "20:00 - 20:50", "21:00 - 21:50"
+            ]
+            
+            date_str = date_resa.strftime("%Y-%m-%d")
+            if date_str not in st.session_state.reservations:
+                st.session_state.reservations[date_str] = {}
+
+            creneau_choisi = st.selectbox("Créneaux disponibles", creneaux)
+            deja_reserve_par = st.session_state.reservations[date_str].get(creneau_choisi)
+
+            if deja_reserve_par:
+                if deja_reserve_par == user_id:
+                    st.warning("Vous avez réservé ce créneau.")
                     
-                    st.success("🎉 Réservation confirmée !")
-                    st.balloons()
-                    
-                    # Génération immédiate de la preuve
                     texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
-                    
-                    # Zone d'affichage visuel du reçu
-                    st.code(texte_recu, language="text")
-                    
-                    # Bouton natif pour sauvegarder le fichier sur son téléphone/PC
                     st.download_button(
-                        label="📥 Télécharger mon reçu officiel (Preuve)",
+                        label="📥 Télécharger à nouveau mon reçu",
                         data=texte_recu,
                         file_name=f"{filename}.txt",
                         mime="text/plain",
-                        key="download_first"
+                        key="download_again"
                     )
+                    
+                    if st.button("❌ Annuler ma réservation", key="btn_annuler"):
+                        del st.session_state.reservations[date_str][creneau_choisi]
+                        save_reservations(st.session_state.reservations)
+                        st.rerun()
+                else:
+                    st.error(f"Ce créneau est déjà réservé par : {deja_reserve_par}")
+            else:
+                if st.button("✅ Réserver ce créneau", key="btn_reserver"):
+                    resas_de_la_journee = st.session_state.reservations[date_str].values()
+                    nb_resas_user = sum(1 for res in resas_de_la_journee if res == user_id)
+                    
+                    if nb_resas_user >= 2:
+                        st.error("🚫 Règles : Vous avez atteint la limite maximale de 2 réservations pour cette journée !")
+                    else:
+                        st.session_state.reservations[date_str][creneau_choisi] = user_id
+                        save_reservations(st.session_state.reservations)
+                        
+                        st.success("🎉 Réservation confirmée !")
+                        st.balloons()
+                        
+                        texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
+                        
+                        st.code(texte_recu, language="text")
+                        
+                        st.download_button(
+                            label="📥 Télécharger mon reçu officiel (Preuve)",
+                            data=texte_recu,
+                            file_name=f"{filename}.txt",
+                            mime="text/plain",
+                            key="download_first"
+                        )
 
-        st.write("---")
-        st.subheader(f"📋 Planning du {date_resa.strftime('%d/%m/%Y')}")
-        for c in creneaux:
-            occupant = st.session_state.reservations[date_str].get(c, "🍃 Libre")
-            st.write(f"**{c}** : {occupant}")
+            st.write("---")
+            st.subheader(f"📋 Planning du {date_resa.strftime('%d/%m/%Y')}")
+            for c in creneaux:
+                occupant = st.session_state.reservations[date_str].get(c, "🍃 Libre")
+                st.write(f"**{c}** : {occupant}")
+        else:
+            st.write("---")
+            st.info("💡 Veuillez entrer un immeuble et un numéro d'appartement valides pour débloquer le planning.")
+
+
+# ==========================================
+# --- ONGLET 2 : STATISTIQUES EN DIRECT ---
+# ==========================================
+with tab_stats:
+    st.title("📊 Statistiques & Transparence")
+    st.write("Visualisation en temps réel de l'occupation du court de tennis et de la répartition des réservations.")
+    
+    # Rechargement des données fraîches depuis le JSON
+    data_stats = load_reservations()
+    
+    if data_stats:
+        records = []
+        for date_str, creneaux in data_stats.items():
+            for creneau, user_id in creneaux.items():
+                records.append({
+                    "Date": date_str,
+                    "Créneau": creneau,
+                    "Logement": user_id
+                })
+        
+        df = pd.DataFrame(records)
+        
+        if not df.empty:
+            df['Date'] = pd.to_datetime(df['Date'])
+            
+            col1, col2 = st.columns(2)
+            col1.metric("Total des réservations", len(df))
+            col2.metric("Logements participants", df['Logement'].nunique())
+            
+            st.divider()
+            
+            st.subheader("🏆 Logements les plus actifs")
+            top_users = df['Logement'].value_counts().head(10)
+            st.bar_chart(top_users)
+            
+            st.subheader("⏰ Créneaux horaires les plus prisés")
+            top_hours = df['Créneau'].value_counts()
+            st.bar_chart(top_hours)
+            
+            with st.expander("🔍 Voir le registre complet des réservations"):
+                st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
+        else:
+            st.info("Aucune réservation enregistrée pour le moment.")
     else:
-        st.write("---")
-        st.info("💡 Veuillez entrer un immeuble et un numéro d'appartement valides pour débloquer le planning.")
+        st.info("Aucune donnée disponible pour établir les statistiques.")
