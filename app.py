@@ -3,52 +3,61 @@ import pandas as pd
 from datetime import datetime, timedelta, date
 import os
 import json
-import requests
+from streamlit_gsheets import GSheetsConnection
 
 # Configuration de la page
 st.set_page_config(page_title="Réservation Tennis Copropriété", layout="centered", page_icon="🎾")
 
-WEBHOOK_URL = st.secrets.get("WEBHOOK_URL", "")
-CSV_SHEET_URL = "https://docs.google.com/spreadsheets/d/1J01dG2VSyRMVIupituQZlLZduUhoVeUZggM4EI0iMw8/gviz/tq?tqx=out:csv"
+# Connexion native Google Sheets via Service Account
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_reservations_df():
     try:
-        # ttl=0 pour relire les données les plus fraîches du Google Sheet
-        df = pd.read_csv(CSV_SHEET_URL)
-        if 'Date' not in df.columns:
+        # ttl=0 garantit qu'on relit toujours les données en direct depuis Google Sheets
+        df = conn.read(ttl=0)
+        if df is None or df.empty or 'Date' not in df.columns:
             return pd.DataFrame(columns=["Date", "Créneau", "Logement"])
         return df.dropna(how="all")
-    except Exception:
+    except Exception as e:
+        st.error(f"⚠️ Erreur de lecture du Google Sheet : {e}")
         return pd.DataFrame(columns=["Date", "Créneau", "Logement"])
 
 def save_reservation_gsheet(date_str, creneau, user_id):
-    if WEBHOOK_URL:
-        payload = {"action": "add", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
-        try:
-            # Envoi du JSON avec redirection explicite
-            requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'}, allow_redirects=True)
-        except Exception as e:
-            st.error(f"Erreur de communication avec Google Sheets : {e}")
+    print(f"--> TENTATIVE D'ENREGISTREMENT: {date_str} | {creneau} | {user_id}")
+    try:
+        df_current = load_reservations_df()
+        new_row = pd.DataFrame([{"Date": str(date_str), "Créneau": str(creneau), "Logement": str(user_id)}])
+        df_updated = pd.concat([df_current, new_row], ignore_index=True)
+        
+        # Mise à jour dans Google Sheets
+        conn.update(data=df_updated)
+        print("--> ENREGISTREMENT RÉUSSI DANS GOOGLE SHEETS !")
+        return True
+    except Exception as e:
+        print(f"--> ERREUR D'ÉCRITURE : {e}")
+        st.error(f"❌ Erreur lors de la sauvegarde dans Google Sheets : {e}")
+        return False
 
 def delete_reservation_gsheet(date_str, creneau, user_id):
-    if WEBHOOK_URL:
-        payload = {"action": "delete", "date": str(date_str), "creneau": str(creneau), "logement": str(user_id)}
-        try:
-            requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={'Content-Type': 'application/json'}, allow_redirects=True)
-        except Exception as e:
-            st.error(f"Erreur de suppression dans Google Sheets : {e}")
-
-def est_creneau_termine(date_str, creneau_str):
+    print(f"--> TENTATIVE DE SUPPRESSION: {date_str} | {creneau} | {user_id}")
     try:
-        heure_fin_str = creneau_str.split("-")[1].strip()
-        dt_fin_creneau = datetime.strptime(f"{date_str} {heure_fin_str}", "%Y-%m-%d %H:%M")
-        return datetime.now() > dt_fin_creneau
-    except Exception:
+        df_current = load_reservations_df()
+        df_updated = df_current[
+            ~((df_current['Date'].astype(str) == str(date_str)) & 
+              (df_current['Créneau'] == str(creneau)) & 
+              (df_current['Logement'] == str(user_id)))
+        ]
+        conn.update(data=df_updated)
+        print("--> SUPPRESSION RÉUSSIE DANS GOOGLE SHEETS !")
+        return True
+    except Exception as e:
+        print(f"--> ERREUR DE SUPPRESSION : {e}")
+        st.error(f"❌ Erreur lors de la suppression : {e}")
         return False
 
 def generer_recu_texte(user_id, date_str_fr, creneau):
     timestamp = datetime.now().strftime("%d/%m/%Y à %H:%M:%S")
-    id_unique = f"RESA-{datetime.now().strftime('%Y%m%d')}-{hash(user_id + date_str_fr + creneau) % 10000:04d}"
+    id_unique = f"RESA-{datetime.now().strftime('%Y%m%d')}-{abs(hash(user_id + date_str_fr + creneau)) % 10000:04d}"
     
     recu = f"""
 ==================================================
@@ -160,40 +169,32 @@ else:
         deja_reserve_par = match_creneau['Logement'].values[0] if not match_creneau.empty else None
 
         if deja_reserve_par:
-            if deja_reserve_par == user_id:
+            if str(deja_reserve_par).strip() == user_id.strip():
                 st.warning("Vous avez réservé ce créneau.")
                 texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
                 st.download_button("📥 Télécharger à nouveau mon reçu", data=texte_recu, file_name=f"{filename}.txt", mime="text/plain", key="download_again")
                 if st.button("❌ Annuler ma réservation", key="btn_annuler"):
-                    delete_reservation_gsheet(date_str, creneau_choisi, user_id)
-                    st.success("Réservation annulée !")
-                    st.rerun()
+                    if delete_reservation_gsheet(date_str, creneau_choisi, user_id):
+                        st.success("Réservation annulée !")
+                        st.rerun()
             else:
                 st.error(f"Ce créneau est déjà réservé par : {deja_reserve_par}")
         else:
             if st.button("✅ Réserver ce créneau", key="btn_reserver"):
+                print(f"CLIC BOUTON RÉSERVER PAR {user_id}")
                 nb_resas_jour_user = len(resas_jour[resas_jour['Logement'] == user_id]) if not resas_jour.empty else 0
-                
-                a_des_resas_futures = False
-                if not df_resas.empty:
-                    resas_user = df_resas[df_resas['Logement'] == user_id]
-                    for _, row in resas_user.iterrows():
-                        if str(row['Date']) > date_aujourdhui.strftime("%Y-%m-%d"):
-                            a_des_resas_futures = True
-                            break
 
                 if nb_resas_jour_user >= 2:
                     st.error("🚫 Règle d'équité : Vous avez déjà 2 réservations enregistrées pour cette journée !")
-                elif date_str > date_aujourdhui.strftime("%Y-%m-%d") and a_des_resas_futures:
-                    st.error("🚫 Règle d'équité : Vous avez déjà un créneau à venir non terminé.")
                 else:
-                    save_reservation_gsheet(date_str, creneau_choisi, user_id)
-                    st.success("🎉 Réservation confirmée et sauvegardée !")
-                    st.balloons()
-                    
-                    texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
-                    st.code(texte_recu, language="text")
-                    st.download_button("📥 Télécharger mon reçu officiel (Preuve)", data=texte_recu, file_name=f"{filename}.txt", mime="text/plain", key="download_first")
+                    if save_reservation_gsheet(date_str, creneau_choisi, user_id):
+                        st.success("🎉 Réservation confirmée et sauvegardée dans Google Sheets !")
+                        st.balloons()
+                        
+                        texte_recu, filename = generer_recu_texte(user_id, date_resa.strftime('%d/%m/%Y'), creneau_choisi)
+                        st.code(texte_recu, language="text")
+                        st.download_button("📥 Télécharger mon reçu officiel (Preuve)", data=texte_recu, file_name=f"{filename}.txt", mime="text/plain", key="download_first")
+                        st.rerun()
 
         st.write("---")
         st.subheader(f"📋 Planning du {date_resa.strftime('%d/%m/%Y')}")
